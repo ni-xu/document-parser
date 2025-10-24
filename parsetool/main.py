@@ -1,3 +1,4 @@
+import random
 import re, json
 import sys
 import oracledb
@@ -31,6 +32,9 @@ def regexParse(text):
     data = []
     for article in articles:
         
+        #if artice contains "Start of Document, remove it"
+        article = re.sub(r"Start of Document\n", "", article)
+
         #takes first line 
         title = re.search(r"(?m)^\s*([A-Za-z0-9'\"()., :;?!/#@_.`'&-]+)\s*$", article)
 
@@ -47,7 +51,7 @@ def regexParse(text):
         else:
             city = re.search(r"Body\s+([A-Z][a-zA-Z.-]*\s+[A-Z][a-zA-Z.-]*)", article)
 
-        body = (f"START OF DOCUMENT\n{article}\nEND OF DOCUMENT\n")
+        body = (f"Start of Document\n{article}\nEnd of Document\n")
 
         # save to data
         if body:
@@ -90,9 +94,9 @@ def sqlCommit(framework, data, session):
     except Exception as e:
         print(f"Error inserting data: {e}")
 
-def batch_fetcher(session):
+def batch_fetcher(session, start_id):
     full_batch = []
-    offset = 0
+    offset = start_id
     while True:
         query = sql_text(f"select body from bwa_articles limit 50 offset {offset}")
         
@@ -107,6 +111,35 @@ def batch_fetcher(session):
         offset += 50
 
     return full_batch
+
+
+def batch_processor(client, to_do):
+    failure_count = 0
+    #for each article batch, 
+    for batch in to_do:
+        print("Loop entered")
+        jsonMonster = geminiParse(client, batch)
+        parsed_data = json.loads(jsonMonster.text)
+        flattened_report = []
+        for item in parsed_data:
+            for report in item["reports"]:
+                flattened_report.append(report)
+        
+        if len(batch) != len(flattened_report):
+            print(f"ERROR: MISMATCHED ARTICLE COUNT {len(batch)} vs {len(flattened_report)}")
+            print("Inserting batch to failed_articles.txt")
+            print("Skipping commit for this batch")
+            with open("parsetool/debug_files/failed_articles.txt", "a", encoding="utf-8") as f:
+                for article in batch:
+                    f.write(article + "\n\n")
+            failure_count += 1
+        else:
+            sqlCommit(llmParse, flattened_report, session)
+
+    return failure_count
+
+
+    
 
 def geminiParse(client, article_batch):
     articles_text = "\n\n".join(article_batch)
@@ -126,12 +159,35 @@ def geminiParse(client, article_batch):
 
     return response
 
-if __name__ == "__main__":
-    # connect to DB
-    session = connectDb()
 
-    # read in text file
-    with open("parsetool/bwamini.txt", "r", encoding="utf-8") as f:
+def validate_entries(start_id, num_entries):
+    # Take 5% of entries with id's from start_id to start_id + num_entries randomly
+    num_list = random.sample(range(start_id, start_id + num_entries), max(1, num_entries // 20))
+    original_query = sql_text(f"select * from bwa_articles where id = {num_list[0]}")
+    final_query = sql_text(f"select * from bwa_final where id = {num_list[0]}")
+    for item in num_list:
+        original_query += sql_text(f" or id = {item}")
+        final_query += sql_text(f" or id = {item}")
+    
+    original_result = session.execute(original_query).all()
+    final_result = session.execute(original_query).all()    
+
+    with open("parsetool/debug_files/validation.txt", "w", encoding="utf-8") as f:
+        
+        for item in original_result:
+            indexer = item[0]
+            f.write(f"Comparison on entry {indexer}:\n")
+            f.write(f"Date: {item[2]} vs {final_result[indexer][2]}\n")
+            f.write(f"City: {item[4]} vs {final_result[indexer][4]}\n")
+            f.write("Original Article Body:\n")
+            f.write(item[5] + "\n")
+
+
+
+
+def mainloop(target_file):
+        # read in text file
+    with open(target_file, "r", encoding="utf-8") as f:
         text = f.read()
 
     # regex parse
@@ -147,27 +203,36 @@ if __name__ == "__main__":
     # prompt LLM
     client = genai.Client()
 
-    to_do = batch_fetcher(session)
+    start_id = int(input("Enter starting offset ID: "))
+
+    to_do = batch_fetcher(session, start_id)
     print("Batching complete")
 
     #debug to_do
-    with open("parsetool/debug_batches.txt", "w", encoding="utf-8") as f:
+    with open("parsetool/debug_files/debug_batches.txt", "w", encoding="utf-8") as f:
         for batch in to_do:
             f.write("------ New Batch -----\n")
             for article in batch:
                 f.write(article + "\n\n")
 
-    #for each article batch, 
-    for article_batch in to_do:
-        print("Loop entered")
-        jsonMonster = geminiParse(client, article_batch)
-        parsed_data = json.loads(jsonMonster.text)
-        flattened_report = []
-        for item in parsed_data:
-            for report in item["reports"]:
-                flattened_report.append(report)
-        
-        print(f"Began with {len(article_batch)} entries, Commiting {len(flattened_report)} entries to DB\n\n")
-        sqlCommit(llmParse, flattened_report, session)
+    failure_count = batch_processor(client, to_do)
 
-        print("Hunnid down")
+    if failure_count > 0:
+        #run program using failed_articles.txt
+        runbool = input("Would you like to retry the failed articles? BE SURE TO MAKE A COPY OF debug_batches " \
+        "OR IT WILL BE OVERWRITTEN")
+        
+        if runbool == "yes":
+            mainloop("parsetool/debug_files/failed_articles.txt")
+
+    validate_entries(start_id, len(unique_articles))
+
+
+
+if __name__ == "__main__":
+    # connect to DB
+    session = connectDb()
+
+    mainloop("parsetool/bwa2010.txt")
+
+

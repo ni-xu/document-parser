@@ -10,7 +10,19 @@ from sqlalchemy.sql import text as sql_text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from sqlSetup import articleParse, llmParse, Base
-from geminiSetup import BWAReport, prompt, BWAReportList #
+from geminiSetup import BWAReport, prompt, BWAReportList 
+
+#*********************************************NOTES FOR SETUP**************************************************
+# Make sure MySQL is installed and running on localhost:3306, with database "bwa_data" created
+# Change root to whatever you have named your SQL user and change pass to your password
+# Add your gemini API key to environment variables as GENAI_API_KEY (instructions can be found on gemini docs)
+#***************************************************************************************************************
+
+# The most common issue is gemini returning an unexpected number of articles, when this happens the batch that
+# gemini failed on is sent to failed_articles.txt. This program will recurse with failed_articles.txt as the input
+# until failed_articles.txt is empty. When initially prompted, the program will ask for an offset ID to start from
+# unless you are continuing from a stopped batch input zero.
+
 
 def connectDb():
     # Atttempt DB connection    
@@ -26,12 +38,12 @@ def connectDb():
         sys.exit(1)
 
 def regexParse(text):
+
     # Split by LexisNexis delimiter
     articles = re.split(r"\n{2,}End of Document", text)
 
     data = []
-    for article in articles:
-        
+    for article in articles:        
         #if artice contains "Start of Document, remove it"
         article = re.sub(r"Start of Document\n", "", article)
 
@@ -51,7 +63,13 @@ def regexParse(text):
         else:
             city = re.search(r"Body\s+([A-Z][a-zA-Z.-]*\s+[A-Z][a-zA-Z.-]*)", article)
 
-        body = (f"Start of Document\n{article}\nEnd of Document\n")
+        city = city.group(0).strip() if city else None
+
+        if city:
+            if len(city) >50:
+                city=city[:50]
+
+        body = (f"Start of Document\n{article}\n\nEnd of Document")
 
         # save to data
         if body:
@@ -59,7 +77,7 @@ def regexParse(text):
                 "title": title.group(0).strip() if date else None,
                 "date": date.group(0).strip() if date else None,
                 "source": source.group(0).strip() if source else None,
-                "city": city.group(0).strip() if city else None,
+                "city": city if city else None,
                 "body": body if body else None
             })
 
@@ -74,6 +92,9 @@ def hashSort(data):
     seen_entries = set()
 
     for article in data:
+        if not article['city'] or not article['date']:
+            continue  # skip incomplete records
+
         if article['city']:
             key = (article['city'].lower().strip(), article['date'])
 
@@ -87,6 +108,7 @@ def hashSort(data):
     return unique_articles
 
 def sqlCommit(framework, data, session):
+    #submits given data to given table 
     try:
         session.bulk_insert_mappings(framework, data)
         session.commit()
@@ -94,7 +116,9 @@ def sqlCommit(framework, data, session):
     except Exception as e:
         print(f"Error inserting data: {e}")
 
+
 def batch_fetcher(session, start_id):
+    # fetch articles of batch size from start_id to finish
     full_batch = []
     offset = start_id
     while True:
@@ -115,9 +139,9 @@ def batch_fetcher(session, start_id):
 
 def batch_processor(client, to_do):
     failure_count = 0
-    #for each article batch, 
+    #for each article batch, if gemini parse returns correct number of articles, commit to SQL
+    #if not, log to failed_articles.txt for retry, which is prompted after all batches are processed
     for batch in to_do:
-        print("Loop entered")
         jsonMonster = geminiParse(client, batch)
         parsed_data = json.loads(jsonMonster.text)
         flattened_report = []
@@ -128,13 +152,14 @@ def batch_processor(client, to_do):
         if len(batch) != len(flattened_report):
             print(f"ERROR: MISMATCHED ARTICLE COUNT {len(batch)} vs {len(flattened_report)}")
             print("Inserting batch to failed_articles.txt")
-            print("Skipping commit for this batch")
+            print("Skipping commit for this batch\n")
             with open("parsetool/debug_files/failed_articles.txt", "a", encoding="utf-8") as f:
                 for article in batch:
                     f.write(article + "\n\n")
             failure_count += 1
         else:
             sqlCommit(llmParse, flattened_report, session)
+            print("\n")
 
     return failure_count
 
@@ -142,8 +167,9 @@ def batch_processor(client, to_do):
     
 
 def geminiParse(client, article_batch):
+    # gemini prompt is found in geminiSetup.py
     articles_text = "\n\n".join(article_batch)
-    input = (f"{prompt}\n\n{articles_text} \n Is this returning 50 JSON objects? If not, something has gone severely wrong, and you must restart the process.")
+    input = (f"{prompt}\n\n{articles_text} \n Is this returning 50 JSON objects? If not, something has gone severely wrong, and you must restart the process. ")
 
     print("Awaiting API response")
     response = client.models.generate_content(
@@ -163,14 +189,14 @@ def geminiParse(client, article_batch):
 def validate_entries(start_id, num_entries):
     # Take 5% of entries with id's from start_id to start_id + num_entries randomly
     num_list = random.sample(range(start_id, start_id + num_entries), max(1, num_entries // 20))
-    original_query = sql_text(f"select * from bwa_articles where id = {num_list[0]}")
-    final_query = sql_text(f"select * from bwa_final where id = {num_list[0]}")
+    original_query = f"select * from bwa_articles where id = {num_list[0]}"
+    final_query = f"select * from bwa_final where id = {num_list[0]}"
     for item in num_list:
-        original_query += sql_text(f" or id = {item}")
-        final_query += sql_text(f" or id = {item}")
+        original_query += f" or id = {item}"
+        final_query += f" or id = {item}"
     
-    original_result = session.execute(original_query).all()
-    final_result = session.execute(original_query).all()    
+    original_result = session.execute(sql_text(original_query)).all()
+    final_result = session.execute(sql_text(original_query)).all()    
 
     with open("parsetool/debug_files/validation.txt", "w", encoding="utf-8") as f:
         
@@ -183,15 +209,15 @@ def validate_entries(start_id, num_entries):
             f.write(item[5] + "\n")
 
 
-
-
 def mainloop(target_file):
         # read in text file
     with open(target_file, "r", encoding="utf-8") as f:
         text = f.read()
+    print("File opened")
 
     # regex parse
     data = regexParse(text)
+    print("Regex parse complete")
 
     # hash sort to remove duplicates
     unique_articles = hashSort(data)
@@ -228,11 +254,9 @@ def mainloop(target_file):
     validate_entries(start_id, len(unique_articles))
 
 
-
 if __name__ == "__main__":
     # connect to DB
     session = connectDb()
 
-    mainloop("parsetool/bwa2010.txt")
-
+    mainloop("parsetool/bwabugged.txt")
 

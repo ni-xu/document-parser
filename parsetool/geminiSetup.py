@@ -37,7 +37,9 @@ prompt = """You are an information extraction system.
               }
 
               ### Extraction Rules:
-              - Publish/start date is ALWAYS found on the third line. Start date and end date should not both be null. THIS IS MANDATORY.
+              - Publish date or start date is ALWAYS found on the third line. If no start date provided, use publish date.
+              - If the document ONLY mentions that the advisory was lifted, use that date as the end_date and set start_date to null.
+              - Start date and end date should not both be null. THIS IS MANDATORY. 
               - Use null for any field that is not mentioned or cannot be confidently inferred.
               - Dates should follow the format "Month DD, YYYY" if available, otherwise null.
               - City should be the primary city mentioned; if multiple cities are listed, choose the first one.
@@ -46,6 +48,13 @@ prompt = """You are an information extraction system.
               - If the article states that an advisory was *lifted*, treat that date as the `end_date`.
               - Do not include extra text, explanations, or commentary—only the JSON object.
 
+              Once again - 50 articles MUST return 50 JSON objects. THIS IS STRICTLY MANDATORY.
+              Once again - 50 articles MUST return 50 JSON objects. THIS IS STRICTLY MANDATORY.
+              Once again - 50 articles MUST return 50 JSON objects. THIS IS STRICTLY MANDATORY.
+              Once again - 50 articles MUST return 50 JSON objects. THIS IS STRICTLY MANDATORY.
+              Once again - 50 articles MUST return 50 JSON objects. THIS IS STRICTLY MANDATORY.
+              Once again - 50 articles MUST return 50 JSON objects. THIS IS STRICTLY MANDATORY.
+              Once again - 50 articles MUST return 50 JSON objects. THIS IS STRICTLY MANDATORY.
               Once again - 50 articles MUST return 50 JSON objects. THIS IS STRICTLY MANDATORY.
               The importance of this cannot be overstated. Failure to comply indicates a critical error.
 

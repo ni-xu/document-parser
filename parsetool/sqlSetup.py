@@ -3,16 +3,18 @@ import oracledb
 from sqlalchemy import create_engine, Column, Integer, String, Text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.dialects.mysql import LONGTEXT
+
 
 Base = declarative_base()
 class articleParse(Base):
     __tablename__ = 'bwa_articles'
     id = Column(Integer, primary_key=True, autoincrement=True)
     title = Column(Text)
-    date = Column(String(30))   
+    date = Column(String(100))   
     source = Column(Text)
     city = Column(String(50))
-    body = Column(Text)
+    body = Column(LONGTEXT)
 
 class llmParse(Base):
     __tablename__ = 'bwa_final'
@@ -25,5 +27,5 @@ class llmParse(Base):
     county = Column(String(100), nullable=True)
     utility_name = Column(String(255), nullable=True)
     cause = Column(String(255), nullable=True)
-    title = Column(String(255), nullable=True)
+    title = Column(Text, nullable=True)
     source = Column(Text, nullable=True)

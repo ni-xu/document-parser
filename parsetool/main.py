@@ -216,10 +216,13 @@ def mainloop(target_file):
     print("File opened")
 
     # regex parse
+    # even if we dont end up using the hash sort, the regex parse is necessary to have a reliable comparison point for the LLM
     data = regexParse(text)
     print("Regex parse complete")
 
     # hash sort to remove duplicates
+    # Dr. Harris suggests we keep duplicates for LLM step to have more context, this can be commented out if desired
+    # If commented out, change all instances of unique_articles to data
     unique_articles = hashSort(data)
 
     # commit to SQL

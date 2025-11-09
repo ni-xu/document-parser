@@ -18,7 +18,7 @@ class articleParse(Base):
 
 class llmParse(Base):
     __tablename__ = 'bwa_final'
-    id = Column(Integer, primary_key=True, autoincrement=True)
+    id = Column(Integer, primary_key=True)
     start_date = Column(String(50), nullable=True)
     end_date = Column(String(50), nullable=True)
     affected_population = Column(Integer, nullable=True)
@@ -29,3 +29,5 @@ class llmParse(Base):
     cause = Column(String(255), nullable=True)
     title = Column(Text, nullable=True)
     source = Column(Text, nullable=True)
+    relevance_level = Column(Integer, nullable=True)
+    classification = Column(Integer, nullable = True)

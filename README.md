@@ -5,5 +5,8 @@ table, then runs each entry through an LLM. The results are then submitted to a 
 articles are checked to prevent hallucination. The result is a flattened version of the given articles in data 
 analyzable form. 
 
+This process is asychronously controlled by a semaphore that regulates the number of tasks that are run at a time, in
+batch_processor, to avoid rate limits. 
+
 By slightly augmenting regex segmentation rules, gemini prompting, and adding a Gemini API key to your local machine,
 this script can be repurposed to process any large text file.
